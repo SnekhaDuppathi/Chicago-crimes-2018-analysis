@@ -1,0 +1,103 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+  pdf_document: default
+---
+
+
+
+```{r Package}
+if(!require("pacman")) install.packages("pacman") 
+pacman::p_load(shiny,tidyverse,ggplot2,corrplot,dplyr,leaflet,DT,lubridate,here)
+```
+
+```{r Data}
+getwd()
+crimes = read.csv('Crimes_-_2018.csv')
+str(crimes)
+summary(crimes)
+sapply(crimes,function(x) sum(is.na(x)))
+crimes=na.omit(crimes)
+crimes$month = substr(crimes$Date,1,2)
+crimes$day = substr(crimes$Date,1,10)
+crimes$month = as.factor(crimes$month)
+crimes$Primary.Type = as.factor(crimes$Primary.Type)
+crimes$day = as.factor(crimes$day)
+crimes$dateformat = mdy_hms(crimes$Date)
+crimes$hour = as.integer(substr(crimes$dateformat,12,13))
+
+```
+While checking the input data for missing values we can see that approximately 1.7% of data has missing values which is a very small percentage so we removed the missing data and used the remaining data for our analysis. 
+
+```{r Data subsetting}
+# Subset for Tab 1
+t1 = data.frame(crimes %>% group_by(Primary.Type,month) %>% tally()) 
+names(t1)[1]="Crime"
+names(t1)[2]="month"
+names(t1)[3]="count"
+t1
+
+#Subset for Tab 2
+t2 = data.frame(crimes$day,crimes$Latitude,crimes$Longitude,crimes$Primary.Type,crimes$Location.Description)
+names(t2)[1]="Date"
+names(t2)[2]="Latitude"
+names(t2)[3]="Longitude"
+names(t2)[4]="Crime_Type"
+names(t2)[5]="Location_Description"
+t2
+
+# Subset for Tab 3
+t3 = data.frame(crimes %>% group_by(Primary.Type,hour) %>% tally()) 
+names(t3)[1]="Crime"
+names(t3)[2]="hour"
+names(t3)[3]="count"
+t3
+
+```
+For building our Shiny app we need only a set specific columns from the input data,so we subset the required columns instead of using the entire data.
+
+```{r Shiny app}
+#Defining ui
+ui = fluidPage(
+  # App title ----
+  titlePanel("Chicago Crimes 2018"),
+  mainPanel(
+  tabsetPanel(
+  tabPanel("Tab 1 - Frequency of crimes", 
+      sidebarPanel(
+      selectInput(inputId ='Crime', label ='Crime type',choices = levels(t1$Crime))),
+      plotOutput("plot1")),
+  tabPanel("Tab 2 - Location of crimes by date",
+      sidebarPanel(
+      selectInput(inputId ='Date', label ='Crime Date',choices = levels(t2$Date))),
+       leafletOutput(outputId ="map1",height = "600px", width = "1000px")
+       ),
+  tabPanel("Tab 3 - Heatmap",
+       plotOutput("plot2",height = "600px", width = "1000px")
+       )
+  ))
+)
+
+#Defining server
+server <- function(input,output){
+  output$plot1 <- renderPlot({
+    out1 <-filter(t1,Crime==input$Crime)
+    ggplot(data=out1,aes(x=out1$month,y=out1$count))+xlab("Months")+ ylab("Count")+ggtitle("Frequency of Crimes in Year 2018")+geom_bar(stat="identity")
+  }  )
+ output$map1 = renderLeaflet({
+    out2<-filter(t2, Date==input$Date)
+  leaflet(out2) %>% addTiles()%>% 
+    addMarkers(lng=out2$Longitude, lat=out2$Latitude,popup=paste('Crime:',out2$Crime_Type,"<br>",'Location Description:',out2$Location_Description))
+   })
+ output$plot2 <- renderPlot({
+    out3 = t3
+    ggplot(data=out3,aes(x=hour,y=Crime))+xlab("Hour of the day")+ ylab("Crime")+ggtitle("Heatmap of  frequency of Crimes throughout the day")+geom_tile(aes(fill=count))+labs(fill="Frequency")+ 
+      scale_fill_gradient(low = 'pink', high = 'blue') 
+  }  )
+}  
+
+shinyApp(ui = ui, server = server)
+```
